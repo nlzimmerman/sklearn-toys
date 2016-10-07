@@ -175,6 +175,7 @@ class LogisticImputer(BaseEstimator, TransformerMixin):
       feature_predictors.append(logreg)
 
     self.feature_predictors_ = feature_predictors
+    return self
 
   def transform(self, X):
     """Impute all missing values in X.
@@ -209,9 +210,11 @@ class LogisticImputer(BaseEstimator, TransformerMixin):
 
     return X_fit
 
-  def score(self, X, y=None, normalize=True, sample_weight=None, return_normalization_basis=False):
+  def score(self, X, y=None, normalize=True, sample_weight=None, score_as_fraction=False):
     if sample_weight is not None:
       raise Exception("We don't know how to score unevenly-weighted samples.")
+    if normalize and score_as_fraction:
+      raise Exception("Returning the score as a fraction implies that the score is normalized.")
     # Hopefully this is self-evident.
     # This is the same workflow as above, only now we are predicting the values we already know,
     # so that we can compare them with the truth. The is NOT the same as self.transform(),
@@ -254,7 +257,11 @@ class LogisticImputer(BaseEstimator, TransformerMixin):
         (x,y) for x,y in zip(np.ravel(X), np.ravel(X_fit)) if not (missing_check(y))
       ]
     )
-    if not return_normalization_basis:
+    # Sample weight is passed along for API compatability, but we had logic higher up
+    # to throw an error if it was not None.
+    if not score_as_fraction:
       return accuracy_score(X_notmissing, X_fit_notmissing, normalize, sample_weight)
     else:
-      return (accuracy_score(X_notmissing, X_fit_notmissing, normalize, sample_weight), len(X_notmissing))
+      from fractions import Fraction
+      # You always need the un-normalized score here, but you will be dividing it by the total
+      return Fraction(accuracy_score(X_notmissing, X_fit_notmissing, False, sample_weight), len(X_notmissing))
