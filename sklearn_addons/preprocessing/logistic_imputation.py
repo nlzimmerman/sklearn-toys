@@ -24,7 +24,7 @@ from sklearn.linear_model import LogisticRegression
 
 import six
 import numbers
-
+from fractions import Fraction
 
 
 zip = six.moves.zip
@@ -262,6 +262,5 @@ class LogisticImputer(BaseEstimator, TransformerMixin):
     if not score_as_fraction:
       return accuracy_score(X_notmissing, X_fit_notmissing, normalize, sample_weight)
     else:
-      from fractions import Fraction
       # You always need the un-normalized score here, but you will be dividing it by the total
       return Fraction(accuracy_score(X_notmissing, X_fit_notmissing, False, sample_weight), len(X_notmissing))
