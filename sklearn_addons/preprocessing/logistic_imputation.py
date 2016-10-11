@@ -16,15 +16,13 @@ from sklearn.utils.fixes import astype
 
 from sklearn.utils.validation import check_is_fitted
 from sklearn.utils.validation import FLOAT_DTYPES
-from sklearn.metrics import accuracy_score
 
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.linear_model import LogisticRegression
 
-
 import six
 import numbers
-from fractions import Fraction
+
 
 
 zip = six.moves.zip
@@ -126,7 +124,7 @@ class LogisticImputer(BaseEstimator, TransformerMixin):
       raise Exception("Matrix appears not to be int and nan.")
 
     n_features = X.shape[1]
-    self.n_features_ = n_features
+
     # So… in order for OneHotEncoder to work, we have to turn the missing values into
     # a scalar. So we'll do that here.
     # This makes the exact same assumptions as preprocessing.OneHotEncoder — it assumes
@@ -162,105 +160,24 @@ class LogisticImputer(BaseEstimator, TransformerMixin):
       # [nonzero_rows] = y_with_missing.nonzero()
       # but that doesn't work when the missing data is a large number
       # because I translated that over from np.nan
-      nonmissing_row_indices = [i for x, i in zip(y_with_missing, range(len(y_with_missing))) if x != m]
+      nonzero_row_indices = [i for x, i in zip(y_with_missing, range(len(y_with_missing))) if x != m]
       # There may be a more efficient way of slicing this? I have not really
       # performance tested this code.
       # x' is this matrix, minus the feature column, minus the columns where the feature column is undefined.
-      x_prime = X[:, _knockout_index(n_features, feature_idx)][nonmissing_row_indices,:]
+      x_prime = X[:, _knockout_index(n_features, feature_idx)][nonzero_row_indices,:]
       x_prime_onehot = self._generate_onehot_encoder().fit_transform(x_prime)
       # y is the feature vector with the missing values removed.
-      y = y_with_missing[nonmissing_row_indices]
+      y = y_with_missing[nonzero_row_indices]
       logreg = LogisticRegression(C = self.C)
       logreg.fit(x_prime_onehot, y)
       feature_predictors.append(logreg)
 
     self.feature_predictors_ = feature_predictors
-    return self
 
-  def transform(self, X):
-    """Impute all missing values in X.
-    """
+    def transform(self, X):
+      """Impute all missing values in X.
 
-    check_is_fitted(self, 'feature_predictors_')
+      """
 
-    if sparse.issparse(X):
-      X = X.todense()
-    else:
-      # I prefer not to overwrite the original.
-      # Ideally this would be a flag you could pass.
-      X = X.copy()
-    # This is where we will write the fitted variables to.
-    # It was either make a copy, or do two sweeps, since imputed data shouldn't be
-    # used as a feature to impute other data.
-    X_fit = X.copy()
-    n_features = X.shape[1]
-    if n_features != self.n_features_:
-      raise Exception("Number of features does not match fit data!")
-    X, m = self._nan_to_placeholder_int(X)
-
-    for feature_idx in range(n_features):
-      # we are only doing this slice to find the missing value indices. No training here!
-      y_with_missing = np.ravel(X[:, feature_idx])
-      # As above, but now I'm finding the indices where data _is_ missing so I can replace it.
-      missing_row_indices = [i for x, i in zip(y_with_missing, range(len(y_with_missing))) if x == m]
-      x_prime = X[:, _knockout_index(n_features, feature_idx)][missing_row_indices,:]
-      x_prime_onehot = self._generate_onehot_encoder().fit_transform(x_prime)
-      y_fit = self.feature_predictors_[feature_idx].predict(x_prime_onehot)
-      X_fit[missing_row_indices, feature_idx] = y_fit
-
-    return X_fit
-
-  def score(self, X, y=None, normalize=True, sample_weight=None, score_as_fraction=False):
-    if sample_weight is not None:
-      raise Exception("We don't know how to score unevenly-weighted samples.")
-    if normalize and score_as_fraction:
-      raise Exception("Returning the score as a fraction implies that the score is normalized.")
-    # Hopefully this is self-evident.
-    # This is the same workflow as above, only now we are predicting the values we already know,
-    # so that we can compare them with the truth. The is NOT the same as self.transform(),
-    # which never changes a known value.
-    check_is_fitted(self, 'feature_predictors_')
-    if sparse.issparse(X):
-      X = X.todense()
-    else:
-      # I prefer not to overwrite the original.
-      # Ideally this would be a flag you could pass.
-      X = X.copy()
-    X_fit = X.copy()
-    n_features = X.shape[1]
-    if n_features != self.n_features_:
-      raise Exception("Number of features does not match fit data!")
-    X, m = self._nan_to_placeholder_int(X)
-    for feature_idx in range(n_features):
-      # we are only doing this slice to find the missing value indices. No training here!
-      y_with_missing = np.ravel(X[:, feature_idx])
-      # As above, but now I'm finding the indices where data _is_ missing so I can replace it.
-      not_missing_row_indices = [i for x, i in zip(y_with_missing, range(len(y_with_missing))) if x != m]
-      # Again: here, we are predicting over the thing that we already know.
-      # You're using cross-validated data, right? :)
-      x_prime = X[:, _knockout_index(n_features, feature_idx)][not_missing_row_indices,:]
-      x_prime_onehot = self._generate_onehot_encoder().fit_transform(x_prime)
-      y_fit = self.feature_predictors_[feature_idx].predict(x_prime_onehot)
-      X_fit[not_missing_row_indices, feature_idx] = y_fit
-
-    # So now we have X and X_fit, and the nans in X and X_fit are in the same places.
-    if np.isnan(self.missing_values_):
-      missing_check = lambda x: np.isnan(x)
-    else:
-      missing_check = lambda x: x==self.missing_values_
-    # In X, we did an inline replace of nan with an integer after we copied it to make X_fit,
-    # so the original nan value will only be present in Y.
-    # Alternatively, we could check for x==m, but we're taking it on faith
-    # That they will be the same (and so we aren't throwing a potential exception.)
-    X_notmissing, X_fit_notmissing = zip(
-      *[
-        (x,y) for x,y in zip(np.ravel(X), np.ravel(X_fit)) if not (missing_check(y))
-      ]
-    )
-    # Sample weight is passed along for API compatability, but we had logic higher up
-    # to throw an error if it was not None.
-    if not score_as_fraction:
-      return accuracy_score(X_notmissing, X_fit_notmissing, normalize, sample_weight)
-    else:
-      # You always need the un-normalized score here, but you will be dividing it by the total
-      return Fraction(accuracy_score(X_notmissing, X_fit_notmissing, False, sample_weight), len(X_notmissing))
+      check_is_fitted(self, 'feature_predictors_')
+      
